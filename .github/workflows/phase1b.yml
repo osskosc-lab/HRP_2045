@@ -1,0 +1,93 @@
+name: HRP Phase 1B Cross-Vendor Falsification
+
+on:
+  push:
+    branches:
+      - agent/hrp-phase1b-cross-vendor
+    paths:
+      - "experiments/phase1b/**"
+      - "tests/test_phase1b.py"
+      - ".github/workflows/phase1b.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+  OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+  ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-4-5' }}
+  GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+
+jobs:
+  cross-vendor-falsification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install HRP test environment
+        run: python -m pip install -e '.[test]'
+
+      - name: Harness regression tests
+        run: python -m pytest -q
+
+      - name: Credential-presence preflight
+        run: |
+          python - <<'PY'
+          import os
+          state = {
+              "openai": bool(os.getenv("OPENAI_API_KEY")),
+              "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+              "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+          }
+          print("provider credential presence (values never printed):", state)
+          print("available providers:", sum(state.values()), "/ 3")
+          PY
+
+      - name: Frozen Phase 1B execution
+        run: python experiments/phase1b/run_phase1b.py --seeds 20 --out results/phase1b
+
+      - name: Validate scientific decision artifact
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("results/phase1b/phase1b_results.json")
+          r = json.loads(p.read_text(encoding="utf-8"))
+          allowed = {
+              "NOT_FALSIFIED_PHASE1B",
+              "FALSIFIED_PHASE1B",
+              "INCONCLUSIVE_PROVIDER_FAILURE",
+              "BLOCKED_INSUFFICIENT_VENDORS",
+          }
+          print("scientific decision:", r["decision"])
+          if r["decision"] not in allowed:
+              raise SystemExit("invalid Phase 1B decision")
+          if r["credentialed_vendors"] >= 3 and r["decision"] == "BLOCKED_INSUFFICIENT_VENDORS":
+              raise SystemExit("decision contradicts credential preflight")
+          PY
+
+      - name: Record dependency snapshot
+        if: always()
+        run: |
+          mkdir -p results/phase1b
+          python -m pip freeze > results/phase1b/pip-freeze.txt
+          printf 'github_repository=%s\ngithub_sha=%s\ngithub_run_id=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" > results/phase1b/github-run.txt
+
+      - name: Upload frozen Phase 1B artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hrp-phase1b-results
+          path: results/phase1b/
+          if-no-files-found: error
+          retention-days: 90
