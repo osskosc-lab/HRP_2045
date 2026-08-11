@@ -8,6 +8,13 @@ on:
       - "experiments/phase1a/**"
       - "tests/test_phase1a.py"
       - ".github/workflows/phase1a.yml"
+  pull_request:
+    branches:
+      - agent/hrp-v1-reference-implementation
+    paths:
+      - "experiments/phase1a/**"
+      - "tests/test_phase1a.py"
+      - ".github/workflows/phase1a.yml"
   workflow_dispatch:
 
 permissions:
