@@ -61,7 +61,7 @@ jobs:
           PY
 
       - name: Frozen Phase 1B execution
-        run: python experiments/phase1b/run_phase1b.py --seeds 20 --out results/phase1b
+        run: python -m experiments.phase1b.run_phase1b --seeds 20 --out results/phase1b
 
       - name: Validate scientific decision artifact
         run: |
