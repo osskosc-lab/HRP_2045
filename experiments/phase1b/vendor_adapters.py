@@ -4,6 +4,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -21,13 +22,6 @@ class ProviderTelemetry:
     transport_failures: int = 0
     normalization_failures: int = 0
     retries: int = 0
-
-
-@dataclass
-class ProviderSpec:
-    name: str
-    model: str
-    credential_env: str
 
 
 RESPONSE_SCHEMA = {
@@ -99,9 +93,13 @@ def _http_json(
         if telemetry is not None:
             telemetry.retries += 1
         time.sleep(2**attempt)
-    if telemetry is not None:
-        telemetry.transport_failures += 1
     raise ProviderTransportError(str(last_error) if last_error else "provider transport failed")
+
+
+def _safe_confidence(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return -1.0
+    return float(value)
 
 
 class BaseVendorAgent:
@@ -129,7 +127,11 @@ class BaseVendorAgent:
     def answer(self, challenge: Challenge) -> AgentResponse:
         self.telemetry.calls += 1
         prompt = build_prompt(challenge)
-        raw = self.call_text(prompt)
+        try:
+            raw = self.call_text(prompt)
+        except ProviderTransportError:
+            self.telemetry.transport_failures += 1
+            raise
         self.raw_outputs.append({"challenge_id": challenge.challenge_id, "raw_text": raw})
         try:
             obj = parse_json_object(raw)
@@ -141,17 +143,29 @@ class BaseVendorAgent:
                 notes="normalization_failure",
             )
 
+        provenance = obj.get("provenance")
+        if not isinstance(provenance, list):
+            provenance = []
+
+        status = obj.get("epistemic_status", "unknown")
+        if not isinstance(status, str):
+            status = "invalid"
+
+        notes = obj.get("notes", "")
+        if not isinstance(notes, str):
+            notes = "invalid_notes_type"
+
         return AgentResponse(
             challenge_id=challenge.challenge_id,
             answer=obj.get("answer"),
-            epistemic_status=obj.get("epistemic_status", "unknown"),
-            confidence=obj.get("confidence", -1.0),
-            provenance=obj.get("provenance") if isinstance(obj.get("provenance"), list) else [],
+            epistemic_status=status,
+            confidence=_safe_confidence(obj.get("confidence")),
+            provenance=provenance,
             requested_action=obj.get("requested_action"),
             action_authorized=obj.get("action_authorized"),
             disagreement=obj.get("disagreement"),
             update_after_counterevidence=obj.get("update_after_counterevidence"),
-            notes=str(obj.get("notes", "")),
+            notes=notes,
         )
 
 
