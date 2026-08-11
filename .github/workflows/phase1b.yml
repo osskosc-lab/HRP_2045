@@ -8,6 +8,13 @@ on:
       - "experiments/phase1b/**"
       - "tests/test_phase1b.py"
       - ".github/workflows/phase1b.yml"
+  pull_request:
+    branches:
+      - agent/hrp-phase1a-falsification
+    paths:
+      - "experiments/phase1b/**"
+      - "tests/test_phase1b.py"
+      - ".github/workflows/phase1b.yml"
   workflow_dispatch:
 
 permissions:
